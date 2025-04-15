@@ -20,7 +20,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Flutter Demo',
+      title: 'Aplicación Firebase',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
@@ -41,61 +41,85 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   final TextEditingController _controllerDNI = TextEditingController();
   final TextEditingController _controllerNombre = TextEditingController();
-  late Future<List> listaUsuarios;
+  late Future<List<Map<String, dynamic>>> listaUsuarios;
 
   @override
   void initState() {
     super.initState();
-    listaUsuarios = obtenerUsuario();
+    _cargarUsuarios();
   }
 
-  Future<List> obtenerUsuario() async {
-    List usuarios = [];
+  void _cargarUsuarios() {
+    setState(() {
+      listaUsuarios = _obtenerUsuarios();
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> _obtenerUsuarios() async {
     try {
-      QuerySnapshot queryUsuarios = await db.collection("usuarios").get();
-      for (var documento in queryUsuarios.docs) {
-        Map<String, dynamic> dataConfig = documento.data() as Map<String, dynamic>;
-        usuarios.add({
-          'dni': dataConfig['dni'] ?? 'Sin DNI',
-          'nombre': dataConfig['nombre'] ?? 'Sin Nombre',
-          'uid': documento.id,
-        });
-      }
+      QuerySnapshot query = await db.collection("usuarios").get();
+      return query.docs.map((doc) {
+        return {
+          'uid': doc.id,
+          'dni': doc['dni'] ?? 'Sin DNI',
+          'nombre': doc['nombre'] ?? 'Sin Nombre',
+        };
+      }).toList();
     } catch (e) {
-      print("Error al obtener usuarios: $e");
+      print("Error al cargar usuarios: $e");
+      return [];
     }
-    return usuarios;
   }
 
-  Future<void> agregarUsuario(String dni, String nombre) async {
-    await db.collection("usuarios").add({
-      'dni': dni,
-      'nombre': nombre,
-    });
+  Future<void> _agregarUsuario() async {
+    if (_controllerDNI.text.isEmpty || _controllerNombre.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("DNI y Nombre son requeridos")),
+      );
+      return;
+    }
+
+    try {
+      await db.collection("usuarios").add({
+        'dni': _controllerDNI.text,
+        'nombre': _controllerNombre.text,
+      });
+      _controllerDNI.clear();
+      _controllerNombre.clear();
+      _cargarUsuarios();
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error al agregar: $e")),
+      );
+    }
   }
 
-  Future<void> actualizarUsuario(String uid, String dni, String nombre) async {
-    await db.collection("usuarios").doc(uid).update({
-      'dni': dni,
-      'nombre': nombre,
-    });
+  Future<void> _actualizarUsuario(String uid, String nuevoNombre) async {
+    try {
+      await db.collection("usuarios").doc(uid).update({
+        'nombre': nuevoNombre,
+      });
+      _cargarUsuarios();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error al actualizar: $e")),
+      );
+    }
   }
 
-  Future<void> eliminarUsuario(String uid) async {
+  Future<void> _eliminarUsuario(String uid) async {
     try {
       await db.collection("usuarios").doc(uid).delete();
+      _cargarUsuarios();
     } catch (e) {
-      print('Error eliminando usuario: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error al eliminar: $e")),
+      );
     }
   }
 
-  void mostrarLista() {
-    setState(() {
-      listaUsuarios = obtenerUsuario();
-    });
-  }
-
-  void dialogAgregarUsuario() {
+  void _mostrarDialogoAgregar() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -105,11 +129,11 @@ class _MyHomePageState extends State<MyHomePage> {
           children: [
             TextField(
               controller: _controllerDNI,
-              decoration: const InputDecoration(hintText: "DNI"),
+              decoration: const InputDecoration(labelText: "DNI"),
             ),
             TextField(
               controller: _controllerNombre,
-              decoration: const InputDecoration(hintText: "Nombre"),
+              decoration: const InputDecoration(labelText: "Nombre"),
             ),
           ],
         ),
@@ -119,16 +143,7 @@ class _MyHomePageState extends State<MyHomePage> {
             child: const Text("Cancelar"),
           ),
           ElevatedButton(
-            onPressed: () async {
-              await agregarUsuario(
-                _controllerDNI.text,
-                _controllerNombre.text,
-              );
-              _controllerDNI.clear();
-              _controllerNombre.clear();
-              mostrarLista();
-              Navigator.pop(context);
-            },
+            onPressed: _agregarUsuario,
             child: const Text("Guardar"),
           ),
         ],
@@ -136,15 +151,15 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  void _showEditDialog(String uid, String dni, String currentNombre) {
-    TextEditingController nombreController = TextEditingController(text: currentNombre);
+  void _mostrarDialogoEditar(String uid, String nombreActual) {
+    final controller = TextEditingController(text: nombreActual);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Modificar Usuario"),
+        title: const Text("Editar Usuario"),
         content: TextField(
-          controller: nombreController,
-          decoration: const InputDecoration(hintText: "Nuevo nombre"),
+          controller: controller,
+          decoration: const InputDecoration(labelText: "Nuevo nombre"),
         ),
         actions: [
           TextButton(
@@ -152,9 +167,8 @@ class _MyHomePageState extends State<MyHomePage> {
             child: const Text("Cancelar"),
           ),
           ElevatedButton(
-            onPressed: () async {
-              await actualizarUsuario(uid, dni, nombreController.text);
-              mostrarLista();
+            onPressed: () {
+              _actualizarUsuario(uid, controller.text);
               Navigator.pop(context);
             },
             child: const Text("Guardar"),
@@ -167,44 +181,55 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-        appBar: AppBar(
-          title: Text(widget.title),
-        ),
-        body: FutureBuilder<List>(
-          future: listaUsuarios,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snapshot.hasError) {
-              return const Center(child: Text("Error al cargar usuarios"));
-            }
-            if (!snapshot.hasData || snapshot.data!.isEmpty) {
-              return const Center(child: Text("No se encontraron usuarios."));
-            }
+      appBar: AppBar(
+        title: Text(widget.title),
+      ),
+      body: FutureBuilder<List<Map<String, dynamic>>>(
+        future: listaUsuarios,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return const Center(child: Text("Error al cargar usuarios"));
+          }
+          if (snapshot.data!.isEmpty) {
+            return const Center(child: Text("No hay usuarios"));
+          }
 
-            return ListView.separated(
-              itemCount: snapshot.data!.length,
-              separatorBuilder: (context, index) => const Divider(),
-              itemBuilder: (context, index) {
-                final usuario = snapshot.data![index];
-                return ListTile(
+          return ListView.builder(
+            itemCount: snapshot.data!.length,
+            itemBuilder: (context, index) {
+              final usuario = snapshot.data![index];
+              return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: ListTile(
                   title: Text(usuario['nombre']),
                   subtitle: Text("DNI: ${usuario['dni']}"),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete, color: Colors.red),
-                    onPressed: () => eliminarUsuario(usuario['uid']).then((_) => mostrarLista()),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.edit, color: Colors.blue),
+                        onPressed: () => _mostrarDialogoEditar(
+                          usuario['uid'], usuario['nombre']),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        onPressed: () => _eliminarUsuario(usuario['uid']),
+                      ),
+                    ],
                   ),
-                  onTap: () => _showEditDialog(usuario['uid'], usuario['dni'], usuario['nombre']),
-                );
-              },
-            );
-          },
-        ),
-        floatingActionButton: FloatingActionButton(
-            onPressed: dialogAgregarUsuario,
-            child: const Icon(Icons.add),
-            ),
-        );
-    }
+                ),
+              );
+            },
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _mostrarDialogoAgregar,
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
 }
